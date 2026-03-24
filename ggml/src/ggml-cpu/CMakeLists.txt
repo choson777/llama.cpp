@@ -377,10 +377,16 @@ function(ggml_add_cpu_backend_variant_impl tag_name)
             cmake_policy(SET CMP0135 NEW)
         endif()
 
-        FetchContent_Declare(KleidiAI_Download
-            URL ${KLEIDIAI_DOWNLOAD_URL}
-            DOWNLOAD_EXTRACT_TIMESTAMP NEW
-            URL_HASH MD5=${KLEIDIAI_ARCHIVE_MD5})
+        if (CMAKE_VERSION VERSION_GREATER_EQUAL "3.24")
+            FetchContent_Declare(KleidiAI_Download
+                URL ${KLEIDIAI_DOWNLOAD_URL}
+                DOWNLOAD_EXTRACT_TIMESTAMP NEW
+                URL_HASH MD5=${KLEIDIAI_ARCHIVE_MD5})
+        else()
+            FetchContent_Declare(KleidiAI_Download
+                URL ${KLEIDIAI_DOWNLOAD_URL}
+                URL_HASH MD5=${KLEIDIAI_ARCHIVE_MD5})
+        endif()
 
         FetchContent_MakeAvailable(KleidiAI_Download)
         FetchContent_GetProperties(KleidiAI_Download

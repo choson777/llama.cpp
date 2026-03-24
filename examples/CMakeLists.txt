@@ -16,6 +16,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 if (EMSCRIPTEN)
 else()
+    add_subdirectory(aicas-step)
     add_subdirectory(batched-bench)
     add_subdirectory(batched)
     add_subdirectory(embedding)
