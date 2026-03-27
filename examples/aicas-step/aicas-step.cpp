@@ -22,6 +22,7 @@ struct cmd_params {
     int32_t n_threads_batch = 0;
     int32_t n_gpu_layers = 0;
     bool flash_attn = false;
+    bool no_mmap = false;
     bool print_prompt = false;
 };
 
@@ -40,6 +41,7 @@ static void print_usage(int, char ** argv) {
     printf("  -tb <n>            batch threads, 0 = same as -t\n");
     printf("  -ngl <n>           gpu layers (default: 0)\n");
     printf("  --flash-attn       enable Flash Attention\n");
+    printf("  --no-mmap          disable mmap when loading model\n");
     printf("  --print-prompt     print prompt before generation\n");
     printf("\n");
 }
@@ -98,6 +100,8 @@ static bool parse_args(int argc, char ** argv, cmd_params & params) {
             }
         } else if (strcmp(argv[i], "--flash-attn") == 0 || strcmp(argv[i], "-fa") == 0) {
             params.flash_attn = true;
+        } else if (strcmp(argv[i], "--no-mmap") == 0) {
+            params.no_mmap = true;
         } else if (strcmp(argv[i], "--print-prompt") == 0) {
             params.print_prompt = true;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -212,6 +216,7 @@ int main(int argc, char ** argv) {
 
         llama_model_params model_params = llama_model_default_params();
         model_params.n_gpu_layers = params.n_gpu_layers;
+        model_params.use_mmap = !params.no_mmap;
 
         llama_model * model = llama_model_load_from_file(params.model_path.c_str(), model_params);
         if (!model) {

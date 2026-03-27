@@ -13,6 +13,7 @@
 #include <cstring>
 #include <cassert>
 #include <cfloat>
+#include <atomic>
 #include <cstdlib> // for qsort
 #include <cstdio>  // for GGML_ASSERT
 
@@ -2180,6 +2181,12 @@ static void ggml_gemm_q4_0_4x4_q8_0(int n, float * GGML_RESTRICT s, size_t bs, c
 }
 
 static void ggml_gemm_q4_0_4x8_q8_0(int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT vx, const void * GGML_RESTRICT vy, int nr, int nc) {
+    static std::atomic<bool> logged_once = false;
+    bool expected = false;
+    if (logged_once.compare_exchange_strong(expected, true, std::memory_order_relaxed)) {
+        GGML_LOG_INFO("%s: hit q4_0_4x8 x q8_0 kernel (n=%d, nr=%d, nc=%d)\n", __func__, n, nr, nc);
+    }
+
     const int qk = QK8_0;
     const int nb = n / qk;
     const int ncols_interleaved = 4;
