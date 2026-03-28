@@ -1324,12 +1324,14 @@ struct multiple_choice_task {
     size_t required_tokens; // needed number of tokens to evaluate all answers
     std::vector<std::vector<llama_token>> seq_tokens;
     std::vector<float> log_probs;
+    std::vector<double> log_probs_sum;
+    std::vector<uint32_t> log_probs_count;
 };
 
 static bool multiple_choice_prepare_one_task(llama_context * ctx, multiple_choice_task& task, bool log_error) {
-    if (task.question.empty() || task.mc1.answers.empty()) {
+    if (task.mc1.answers.empty()) {
         if (log_error) {
-            LOG_ERR("%s: found bad task with empty question and/or answers\n", __func__);
+            LOG_ERR("%s: found bad task with no answers\n", __func__);
         }
         return false;
     }
@@ -1341,7 +1343,7 @@ static bool multiple_choice_prepare_one_task(llama_context * ctx, multiple_choic
             }
             return false;
         }
-        task.seq_tokens.emplace_back(::common_tokenize(ctx, task.question + " " + answer, true));
+        task.seq_tokens.emplace_back(::common_tokenize(ctx, task.question + answer, true));
     }
     auto min_len = task.seq_tokens.front().size();
     for (auto& seq : task.seq_tokens) {
@@ -1489,9 +1491,18 @@ static void multiple_choice_score(llama_context * ctx, const common_params & par
         LOG("done\n");
     }
 
-    LOG_INF("%s : calculating TruthfulQA score over %zu tasks.\n", __func__, tasks.size());
+    LOG_INF("%s : calculating multiple choice score over %zu tasks.\n", __func__, tasks.size());
 
     LOG("\ntask\tacc_norm\n");
+
+    std::ofstream machine_output;
+    if (!params.out_file.empty()) {
+        machine_output.open(params.out_file, std::ios::out | std::ios::trunc);
+        if (!machine_output) {
+            LOG_ERR("%s: failed to open %s for writing\n", __func__, params.out_file.c_str());
+            return;
+        }
+    }
 
     const int n_ctx   = llama_n_ctx(ctx);
     const int n_batch = params.n_batch;
@@ -1617,15 +1628,19 @@ static void multiple_choice_score(llama_context * ctx, const common_params & par
             const auto first_probs = softmax(tok_logits);
 
             cur_task.log_probs.resize(cur_task.seq_tokens.size());
+            cur_task.log_probs_sum.resize(cur_task.seq_tokens.size());
+            cur_task.log_probs_count.resize(cur_task.seq_tokens.size());
             for (int s = 0; s < int(cur_task.seq_tokens.size()); ++s) {
                 size_t count = 1;
-                float  log_prob  = std::log(first_probs[cur_task.seq_tokens[s][cur_task.common_prefix]]);
+                double log_prob  = std::log(first_probs[cur_task.seq_tokens[s][cur_task.common_prefix]]);
                 for (size_t j = cur_task.common_prefix; j < cur_task.seq_tokens[s].size() - 1; j++) {
                     //LOG("        %zu  %g\n", ir, eval_results[ir]);
                     ++count;
                     log_prob += eval_results[ir++];
                 }
                 cur_task.log_probs[s] = log_prob / count;
+                cur_task.log_probs_sum[s] = log_prob;
+                cur_task.log_probs_count[s] = count;
                 //LOG("        Final: %g\n", log_prob / count);
                 //LOG("    <%s> : %g\n", cur_task.mc1.answers[s].c_str(), log_prob/count);
             }
@@ -1645,6 +1660,22 @@ static void multiple_choice_score(llama_context * ctx, const common_params & par
                 ++n_correct;
             }
             ++n_done;
+
+            if (machine_output) {
+                for (size_t s = 0; s < cur_task.log_probs.size(); ++s) {
+                    machine_output
+                        << (n_done - 1)
+                        << '\t'
+                        << s
+                        << '\t'
+                        << cur_task.log_probs_sum[s]
+                        << '\t'
+                        << cur_task.log_probs[s]
+                        << '\t'
+                        << cur_task.log_probs_count[s]
+                        << '\n';
+                }
+            }
 
             // Print the accumulated accuracy mean x 100
             LOG("%d\t%.8lf\n", n_done, 100.*n_correct/n_done);
