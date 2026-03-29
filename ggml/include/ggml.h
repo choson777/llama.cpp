@@ -1345,6 +1345,12 @@ extern "C" {
             struct ggml_tensor  * a,  // data
             struct ggml_tensor  * b); // row indices
 
+    GGML_API struct ggml_tensor * ggml_get_rows_ext(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,        // data
+            struct ggml_tensor  * b,        // row indices
+            enum ggml_type        type);    // requested output type
+
     GGML_API struct ggml_tensor * ggml_get_rows_back(
             struct ggml_context * ctx,
             struct ggml_tensor  * a,  // gradients of ggml_get_rows result
@@ -2170,8 +2176,9 @@ extern "C" {
 #        define GGML_RESTRICT restrict
 #    endif
 #endif
-    typedef void (*ggml_to_float_t)  (const void  * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k);
-    typedef void (*ggml_from_float_t)(const float * GGML_RESTRICT x, void  * GGML_RESTRICT y, int64_t k);
+    typedef void (*ggml_to_float_t)   (const void  * GGML_RESTRICT x, float       * GGML_RESTRICT y, int64_t k);
+    typedef void (*ggml_to_float16_t) (const void  * GGML_RESTRICT x, ggml_fp16_t * GGML_RESTRICT y, int64_t k);
+    typedef void (*ggml_from_float_t) (const float * GGML_RESTRICT x, void        * GGML_RESTRICT y, int64_t k);
 
     struct ggml_type_traits {
         const char             * type_name;
@@ -2180,6 +2187,7 @@ extern "C" {
         size_t                   type_size;
         bool                     is_quantized;
         ggml_to_float_t          to_float;
+        ggml_to_float16_t        to_float16;
         ggml_from_float_t        from_float_ref;
     };
 

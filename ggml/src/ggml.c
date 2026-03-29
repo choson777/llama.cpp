@@ -620,6 +620,7 @@ static const struct ggml_type_traits type_traits[GGML_TYPE_COUNT] = {
         .type_size                = sizeof(block_q4_0),
         .is_quantized             = true,
         .to_float                 = (ggml_to_float_t) dequantize_row_q4_0,
+        .to_float16               = (ggml_to_float16_t) dequantize_row_q4_0_f16,
         .from_float_ref           = (ggml_from_float_t) quantize_row_q4_0_ref,
     },
     [GGML_TYPE_Q4_1] = {
@@ -3315,19 +3316,21 @@ struct ggml_tensor * ggml_transpose(
 
 // ggml_get_rows
 
-struct ggml_tensor * ggml_get_rows(
+struct ggml_tensor * ggml_get_rows_ext(
         struct ggml_context * ctx,
         struct ggml_tensor  * a,
-        struct ggml_tensor  * b) {
+        struct ggml_tensor  * b,
+        enum ggml_type        type) {
     GGML_ASSERT(a->ne[2] == b->ne[1]);
     GGML_ASSERT(b->ne[3] == 1);
     GGML_ASSERT(b->type == GGML_TYPE_I32);
 
-    // TODO: implement non F32 return
-    enum ggml_type type = GGML_TYPE_F32;
     if (a->type == GGML_TYPE_I32) {
-        type = a->type;
+        GGML_ASSERT(type == GGML_TYPE_I32);
+    } else {
+        GGML_ASSERT(type == GGML_TYPE_F32 || type == GGML_TYPE_F16 || type == GGML_TYPE_BF16);
     }
+
     struct ggml_tensor * result = ggml_new_tensor_4d(ctx, type, a->ne[0], b->ne[0], b->ne[1], b->ne[2]);
 
     result->op     = GGML_OP_GET_ROWS;
@@ -3335,6 +3338,18 @@ struct ggml_tensor * ggml_get_rows(
     result->src[1] = b;
 
     return result;
+}
+
+struct ggml_tensor * ggml_get_rows(
+        struct ggml_context * ctx,
+        struct ggml_tensor  * a,
+        struct ggml_tensor  * b) {
+    enum ggml_type type = GGML_TYPE_F32;
+    if (a->type == GGML_TYPE_I32) {
+        type = a->type;
+    }
+
+    return ggml_get_rows_ext(ctx, a, b, type);
 }
 
 // ggml_get_rows_back

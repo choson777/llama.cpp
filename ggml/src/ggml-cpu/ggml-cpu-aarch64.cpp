@@ -5337,6 +5337,10 @@ class tensor_traits_base : public ggml::cpu::tensor_traits {
 template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PARAM_TYPE> class tensor_traits : public tensor_traits_base {
 
     bool work_size(int /* n_threads */, const struct ggml_tensor * op, size_t & size) override {
+        if (op->src[1]->type != GGML_TYPE_F32) {
+            return false;
+        }
+
         // not realy a GGML_TYPE_Q8_0 but same size.
         switch (op->op) {
             case GGML_OP_MUL_MAT:
@@ -5355,6 +5359,10 @@ template <typename BLOC_TYPE, int64_t INTER_SIZE, int64_t NB_COLS, ggml_type PAR
     }
 
     bool compute_forward(struct ggml_compute_params * params, struct ggml_tensor * op) override {
+        if (op->src[1]->type != GGML_TYPE_F32) {
+            return false;
+        }
+
         switch (op->op) {
             case GGML_OP_MUL_MAT:
                 forward_mul_mat(params, op);

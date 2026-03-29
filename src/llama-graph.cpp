@@ -694,6 +694,9 @@ ggml_tensor * llm_graph_context::build_norm(
     }
 
     if (mw) {
+        if (cur->type == GGML_TYPE_F16 && mw->type == GGML_TYPE_F32) {
+            mw = ggml_cast(ctx0, mw, GGML_TYPE_F16);
+        }
         cur = ggml_mul(ctx0, cur, mw);
         if (mb) {
             cb(cur, "norm_w", il);
@@ -964,7 +967,7 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
         //cb(inp->tokens, "inp_tokens", -1);
         ggml_set_input(inp->tokens);
 
-        cur = ggml_get_rows(ctx0, tok_embd, inp->tokens);
+        cur = ggml_get_rows_ext(ctx0, tok_embd, inp->tokens, GGML_TYPE_F16);
 
         // apply lora for embedding tokens if needed
         for (const auto & lora : *loras) {
@@ -1659,4 +1662,3 @@ void llm_graph_context::build_pooling(
 
     ggml_build_forward_expand(gf, cur);
 }
-
