@@ -279,6 +279,33 @@ void dequantize_row_q4_0_f16(const block_q4_0 * GGML_RESTRICT x, ggml_fp16_t * G
 
     const int nb = k / qk;
 
+#if defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    const uint8x16_t low_mask = vdupq_n_u8(0x0F);
+    const int16x8_t offset = vdupq_n_s16(8);
+
+    for (int i = 0; i < nb; i++) {
+        const float16x8_t d8 = vreinterpretq_f16_u16(vdupq_n_u16(x[i].d));
+        const uint8x16_t q = vld1q_u8(x[i].qs);
+
+        const uint8x16_t q_lo = vandq_u8(q, low_mask);
+        const uint8x16_t q_hi = vshrq_n_u8(q, 4);
+
+        const int16x8_t lo0 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(q_lo))),  offset);
+        const int16x8_t lo1 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(q_lo))), offset);
+        const int16x8_t hi0 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_low_u8(q_hi))),  offset);
+        const int16x8_t hi1 = vsubq_s16(vreinterpretq_s16_u16(vmovl_u8(vget_high_u8(q_hi))), offset);
+
+        const float16x8_t y_lo0 = vmulq_f16(vcvtq_f16_s16(lo0), d8);
+        const float16x8_t y_lo1 = vmulq_f16(vcvtq_f16_s16(lo1), d8);
+        const float16x8_t y_hi0 = vmulq_f16(vcvtq_f16_s16(hi0), d8);
+        const float16x8_t y_hi1 = vmulq_f16(vcvtq_f16_s16(hi1), d8);
+
+        vst1q_f16((float16_t *) (y + i*qk + 0),  y_lo0);
+        vst1q_f16((float16_t *) (y + i*qk + 8),  y_lo1);
+        vst1q_f16((float16_t *) (y + i*qk + 16), y_hi0);
+        vst1q_f16((float16_t *) (y + i*qk + 24), y_hi1);
+    }
+#else
     for (int i = 0; i < nb; i++) {
         const float d = GGML_FP16_TO_FP32(x[i].d);
 
@@ -290,6 +317,7 @@ void dequantize_row_q4_0_f16(const block_q4_0 * GGML_RESTRICT x, ggml_fp16_t * G
             y[i*qk + j + qk/2] = GGML_FP32_TO_FP16(x1*d);
         }
     }
+#endif
 }
 
 void dequantize_row_q4_1(const block_q4_1 * GGML_RESTRICT x, float * GGML_RESTRICT y, int64_t k) {

@@ -8289,10 +8289,32 @@ static void ggml_compute_forward_rms_norm_f16(
                 const ggml_fp16_t * x = (ggml_fp16_t *) ((char *) src0->data + i01*nb01 + i02*nb02 + i03*nb03);
 
                 ggml_float sum = 0.0;
+#if defined(__ARM_NEON) && defined(__aarch64__)
+                int64_t i00 = 0;
+                float32x4_t sum0 = vdupq_n_f32(0.0f);
+                float32x4_t sum1 = vdupq_n_f32(0.0f);
+
+                for (; i00 + 8 <= ne00; i00 += 8) {
+                    const float16x8_t xv = vld1q_f16((const ggml_fp16_internal_t *) (x + i00));
+                    const float32x4_t xl = vcvt_f32_f16(vget_low_f16(xv));
+                    const float32x4_t xh = vcvt_f32_f16(vget_high_f16(xv));
+
+                    sum0 = vfmaq_f32(sum0, xl, xl);
+                    sum1 = vfmaq_f32(sum1, xh, xh);
+                }
+
+                sum += (ggml_float) vaddvq_f32(vaddq_f32(sum0, sum1));
+
+                for (; i00 < ne00; i00++) {
+                    const float xv = GGML_FP16_TO_FP32(x[i00]);
+                    sum += (ggml_float) (xv * xv);
+                }
+#else
                 for (int64_t i00 = 0; i00 < ne00; i00++) {
                     const float xv = GGML_FP16_TO_FP32(x[i00]);
                     sum += (ggml_float)(xv * xv);
                 }
+#endif
 
                 const float mean = sum/ne00;
 

@@ -143,6 +143,11 @@ target_link_libraries(test-get-rows-q4-f16 PRIVATE llama)
 add_test(NAME test-get-rows-q4-f16 COMMAND $<TARGET_FILE:test-get-rows-q4-f16>)
 set_property(TEST test-get-rows-q4-f16 PROPERTY LABELS main)
 
+add_executable(test-rms-norm-f16 test-rms-norm-f16.cpp)
+target_link_libraries(test-rms-norm-f16 PRIVATE llama)
+add_test(NAME test-rms-norm-f16 COMMAND $<TARGET_FILE:test-rms-norm-f16>)
+set_property(TEST test-rms-norm-f16 PROPERTY LABELS main)
+
 llama_target_and_test(test-model-load-cancel.cpp  LABEL "model")
 llama_target_and_test(test-autorelease.cpp        LABEL "model")
 
