@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <cinttypes>
 
+#include "ggml-cpu.h"
+
 //
 // llama_context
 //
@@ -205,6 +207,21 @@ llama_context::llama_context(
             throw std::runtime_error("failed to initialize self-attention cache");
         }
 
+        if ((hparams.rope_type == LLAMA_ROPE_TYPE_NORM || hparams.rope_type == LLAMA_ROPE_TYPE_NEOX) &&
+                hparams.n_rot > 0) {
+            ggml_rope_cache_prepare_normal(
+                    (int32_t) cparams.n_ctx,
+                    (int32_t) hparams.n_rot,
+                    cparams.rope_freq_base,
+                    cparams.rope_freq_scale,
+                    (int32_t) cparams.n_ctx_orig_yarn,
+                    cparams.yarn_ext_factor,
+                    cparams.yarn_attn_factor,
+                    cparams.yarn_beta_fast,
+                    cparams.yarn_beta_slow);
+            rope_cache_normal_prepared = true;
+        }
+
         {
             const size_t memory_size_k = kv_self->size_k_bytes();
             const size_t memory_size_v = kv_self->size_v_bytes();
@@ -389,7 +406,11 @@ llama_context::llama_context(
     }
 }
 
-llama_context::~llama_context() = default;
+llama_context::~llama_context() {
+    if (rope_cache_normal_prepared) {
+        ggml_rope_cache_clear_normal();
+    }
+}
 
 void llama_context::synchronize() {
     ggml_backend_sched_synchronize(sched.get());

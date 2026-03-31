@@ -246,6 +246,22 @@ typedef pthread_t ggml_thread_t;
 
 static const size_t CACHE_LINE_SIZE_F32 = CACHE_LINE_SIZE/sizeof(float);
 
+struct ggml_rope_cache_normal {
+    int32_t n_ctx;
+    int32_t n_dims;
+    int32_t n_ctx_orig;
+    float   freq_base;
+    float   freq_scale;
+    float   ext_factor;
+    float   attn_factor;
+    float   beta_fast;
+    float   beta_slow;
+    float * data;
+    size_t  size;
+};
+
+static struct ggml_rope_cache_normal g_rope_cache_normal = { 0 };
+
 
 static void ggml_vec_dot_f32(int n, float * GGML_RESTRICT s, size_t bs, const float * GGML_RESTRICT x, size_t bx, const float * GGML_RESTRICT y, size_t by, int nrc);
 static void ggml_vec_dot_f16(int n, float * GGML_RESTRICT s, size_t bs, ggml_fp16_t * GGML_RESTRICT x, size_t bx, ggml_fp16_t * GGML_RESTRICT y, size_t by, int nrc);
@@ -297,6 +313,9 @@ static const struct ggml_type_traits_cpu type_traits_cpu[GGML_TYPE_COUNT] = {
     },
     [GGML_TYPE_Q8_0] = {
         .from_float               = quantize_row_q8_0,
+#ifdef GGML_USE_CPU_AARCH64
+        .from_float16             = (ggml_from_float16_t) ggml_quantize_row_q8_0_f16,
+#endif
         .vec_dot                  = ggml_vec_dot_q8_0_q8_0,
         .vec_dot_type             = GGML_TYPE_Q8_0,
 #if defined (__ARM_FEATURE_MATMUL_INT8)
@@ -10692,6 +10711,115 @@ static void ggml_rope_cache_init(
     }
 }
 
+void ggml_rope_cache_clear_normal(void) {
+    if (g_rope_cache_normal.data != NULL) {
+        ggml_aligned_free(g_rope_cache_normal.data, g_rope_cache_normal.size);
+    }
+
+    memset(&g_rope_cache_normal, 0, sizeof(g_rope_cache_normal));
+}
+
+void ggml_rope_cache_prepare_normal(
+        int32_t n_ctx,
+        int32_t n_dims,
+        float   freq_base,
+        float   freq_scale,
+        int32_t n_ctx_orig,
+        float   ext_factor,
+        float   attn_factor,
+        float   beta_fast,
+        float   beta_slow) {
+    GGML_ASSERT(n_ctx >= 0);
+    GGML_ASSERT(n_dims >= 0);
+    GGML_ASSERT((n_dims % 2) == 0);
+
+    if (n_ctx == 0 || n_dims == 0) {
+        ggml_rope_cache_clear_normal();
+        return;
+    }
+
+    if (g_rope_cache_normal.data != NULL &&
+            g_rope_cache_normal.n_ctx       == n_ctx &&
+            g_rope_cache_normal.n_dims      == n_dims &&
+            g_rope_cache_normal.n_ctx_orig  == n_ctx_orig &&
+            g_rope_cache_normal.freq_base   == freq_base &&
+            g_rope_cache_normal.freq_scale  == freq_scale &&
+            g_rope_cache_normal.ext_factor  == ext_factor &&
+            g_rope_cache_normal.attn_factor == attn_factor &&
+            g_rope_cache_normal.beta_fast   == beta_fast &&
+            g_rope_cache_normal.beta_slow   == beta_slow) {
+        return;
+    }
+
+    ggml_rope_cache_clear_normal();
+
+    const size_t size = (size_t) n_ctx * (size_t) n_dims * sizeof(float);
+    float * data = (float *) ggml_aligned_malloc(size);
+    GGML_ASSERT(data != NULL);
+
+    const float theta_scale = powf(freq_base, -2.0f/n_dims);
+    float corr_dims[2];
+    ggml_rope_yarn_corr_dims(n_dims, n_ctx_orig, freq_base, beta_fast, beta_slow, corr_dims);
+
+    for (int32_t p = 0; p < n_ctx; ++p) {
+        ggml_rope_cache_init(
+                (float) p,
+                freq_scale,
+                NULL,
+                corr_dims,
+                n_dims,
+                ext_factor,
+                attn_factor,
+                data + (size_t) p * (size_t) n_dims,
+                1.0f,
+                theta_scale);
+    }
+
+    g_rope_cache_normal.n_ctx       = n_ctx;
+    g_rope_cache_normal.n_dims      = n_dims;
+    g_rope_cache_normal.n_ctx_orig  = n_ctx_orig;
+    g_rope_cache_normal.freq_base   = freq_base;
+    g_rope_cache_normal.freq_scale  = freq_scale;
+    g_rope_cache_normal.ext_factor  = ext_factor;
+    g_rope_cache_normal.attn_factor = attn_factor;
+    g_rope_cache_normal.beta_fast   = beta_fast;
+    g_rope_cache_normal.beta_slow   = beta_slow;
+    g_rope_cache_normal.data        = data;
+    g_rope_cache_normal.size        = size;
+}
+
+static const float * ggml_rope_cache_lookup_normal(
+        int64_t p,
+        int32_t n_dims,
+        int32_t n_ctx_orig,
+        float   freq_base,
+        float   freq_scale,
+        float   ext_factor,
+        float   attn_factor,
+        float   beta_fast,
+        float   beta_slow) {
+    if (g_rope_cache_normal.data == NULL) {
+        return NULL;
+    }
+
+    if (p < 0 || p >= g_rope_cache_normal.n_ctx) {
+        return NULL;
+    }
+
+    if (g_rope_cache_normal.n_dims      != n_dims ||
+            g_rope_cache_normal.n_ctx_orig  != n_ctx_orig ||
+            g_rope_cache_normal.freq_base   != freq_base ||
+            g_rope_cache_normal.freq_scale  != freq_scale ||
+            g_rope_cache_normal.ext_factor  != ext_factor ||
+            g_rope_cache_normal.attn_factor != attn_factor ||
+            g_rope_cache_normal.beta_fast   != beta_fast ||
+            g_rope_cache_normal.beta_slow   != beta_slow) {
+        return NULL;
+    }
+
+    return g_rope_cache_normal.data + (size_t) p * (size_t) n_dims;
+}
+
 static void ggml_mrope_cache_init(
      float theta_base_t, float theta_base_h, float theta_base_w, float theta_base_e, int sections[4], bool indep_sects,
      float freq_scale, const float * freq_factors, float corr_dims[2], int64_t ne0, float ext_factor, float mscale,
@@ -10835,10 +10963,22 @@ static void ggml_compute_forward_rope_f32(
     for (int64_t i3 = 0; i3 < ne3; i3++) { // batch
         for (int64_t i2 = 0; i2 < ne2; i2++) { // seq-len
 
-            float * cache = (float *) params->wdata + (ne0 + CACHE_LINE_SIZE_F32)*ith;
+            const int64_t p = pos[i2];
+            float * cache_local = (float *) params->wdata + (ne0 + CACHE_LINE_SIZE_F32)*ith;
+            const float * cache = NULL;
+            bool use_precomputed_cache = false;
+
             if (!is_mrope) {
-                const int64_t p = pos[i2];
-                ggml_rope_cache_init(p, freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache, sin_sign, theta_scale);
+                if (!is_vision && freq_factors == NULL) {
+                    cache = ggml_rope_cache_lookup_normal(
+                            p, n_dims, n_ctx_orig, freq_base, freq_scale,
+                            ext_factor, attn_factor, beta_fast, beta_slow);
+                    use_precomputed_cache = cache != NULL;
+                }
+                if (!use_precomputed_cache) {
+                    ggml_rope_cache_init(p, freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache_local, sin_sign, theta_scale);
+                    cache = cache_local;
+                }
             }
             else {
                 const int64_t p_t = pos[i2];
@@ -10847,8 +10987,11 @@ static void ggml_compute_forward_rope_f32(
                 const int64_t p_e = pos[i2 + ne2 * 3];
                 ggml_mrope_cache_init(
                     p_t, p_h, p_w, p_e, sections, is_vision,
-                    freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache, sin_sign, theta_scale);
+                    freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache_local, sin_sign, theta_scale);
+                cache = cache_local;
             }
+
+            const float sin_scale = use_precomputed_cache ? sin_sign : 1.0f;
 
             for (int64_t i1 = 0; i1 < ne1; i1++) { // attn-heads
                 if (ir++ < ir0) continue;
@@ -10860,7 +11003,7 @@ static void ggml_compute_forward_rope_f32(
                             const int64_t ic = i0/2;
 
                             const float cos_theta = cache[i0 + 0];
-                            const float sin_theta = cache[i0 + 1];
+                            const float sin_theta = cache[i0 + 1] * sin_scale;
 
                             const float * const src = (float *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                             float * dst_data  = (float *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);
@@ -10876,7 +11019,7 @@ static void ggml_compute_forward_rope_f32(
                             const int64_t ic = i0/2;
 
                             const float cos_theta = cache[i0 + 0];
-                            const float sin_theta = cache[i0 + 1];
+                            const float sin_theta = cache[i0 + 1] * sin_scale;
 
                             const float * const src = (float *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                             float * dst_data  = (float *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);
@@ -10891,7 +11034,7 @@ static void ggml_compute_forward_rope_f32(
                 } else {
                     for (int64_t i0 = 0; i0 < n_dims; i0 += 2) {
                         const float cos_theta = cache[i0 + 0];
-                        const float sin_theta = cache[i0 + 1];
+                        const float sin_theta = cache[i0 + 1] * sin_scale;
 
                         const float * const src = (float *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + i0*nb00);
                               float * dst_data  = (float *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + i0*nb0);
@@ -10909,7 +11052,7 @@ static void ggml_compute_forward_rope_f32(
                         const int64_t ic = i0/2;
 
                         const float cos_theta = cache[i0 + 0];
-                        const float sin_theta = cache[i0 + 1];
+                        const float sin_theta = cache[i0 + 1] * sin_scale;
 
                         const float * const src = (float *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                         float * dst_data  = (float *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);
@@ -11021,10 +11164,22 @@ static void ggml_compute_forward_rope_f16(
     for (int64_t i3 = 0; i3 < ne3; i3++) {
         for (int64_t i2 = 0; i2 < ne2; i2++) {
 
-            float * cache = (float *) params->wdata + (ne0 + CACHE_LINE_SIZE_F32)*ith;
+            const int64_t p = pos[i2];
+            float * cache_local = (float *) params->wdata + (ne0 + CACHE_LINE_SIZE_F32)*ith;
+            const float * cache = NULL;
+            bool use_precomputed_cache = false;
+
             if (!is_mrope) {
-                const int64_t p = pos[i2];
-                ggml_rope_cache_init(p, freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache, sin_sign, theta_scale);
+                if (!is_vision && freq_factors == NULL) {
+                    cache = ggml_rope_cache_lookup_normal(
+                            p, n_dims, n_ctx_orig, freq_base, freq_scale,
+                            ext_factor, attn_factor, beta_fast, beta_slow);
+                    use_precomputed_cache = cache != NULL;
+                }
+                if (!use_precomputed_cache) {
+                    ggml_rope_cache_init(p, freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache_local, sin_sign, theta_scale);
+                    cache = cache_local;
+                }
             }
             else {
                 const int64_t p_t = pos[i2];
@@ -11033,8 +11188,11 @@ static void ggml_compute_forward_rope_f16(
                 const int64_t p_e = pos[i2 + ne2 * 3];
                 ggml_mrope_cache_init(
                     p_t, p_h, p_w, p_e, sections, is_vision,
-                    freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache, sin_sign, theta_scale);
+                    freq_scale, freq_factors, corr_dims, ne0, ext_factor, attn_factor, cache_local, sin_sign, theta_scale);
+                cache = cache_local;
             }
+
+            const float sin_scale = use_precomputed_cache ? sin_sign : 1.0f;
 
             for (int64_t i1 = 0; i1 < ne1; i1++) {
                 if (ir++ < ir0) continue;
@@ -11046,7 +11204,7 @@ static void ggml_compute_forward_rope_f16(
                             const int64_t ic = i0/2;
 
                             const float cos_theta = cache[i0 + 0];
-                            const float sin_theta = cache[i0 + 1];
+                            const float sin_theta = cache[i0 + 1] * sin_scale;
 
                             const ggml_fp16_t * const src = (ggml_fp16_t *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                             ggml_fp16_t * dst_data  = (ggml_fp16_t *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);
@@ -11062,7 +11220,7 @@ static void ggml_compute_forward_rope_f16(
                             const int64_t ic = i0/2;
 
                             const float cos_theta = cache[i0 + 0];
-                            const float sin_theta = cache[i0 + 1];
+                            const float sin_theta = cache[i0 + 1] * sin_scale;
 
                             const ggml_fp16_t * const src = (ggml_fp16_t *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                             ggml_fp16_t * dst_data  = (ggml_fp16_t *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);
@@ -11077,7 +11235,7 @@ static void ggml_compute_forward_rope_f16(
                 } else {
                     for (int64_t i0 = 0; i0 < n_dims; i0 += 2) {
                         const float cos_theta = cache[i0 + 0];
-                        const float sin_theta = cache[i0 + 1];
+                        const float sin_theta = cache[i0 + 1] * sin_scale;
 
                         const ggml_fp16_t * const src = (ggml_fp16_t *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + i0*nb00);
                               ggml_fp16_t * dst_data  = (ggml_fp16_t *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + i0*nb0);
@@ -11095,7 +11253,7 @@ static void ggml_compute_forward_rope_f16(
                         const int64_t ic = i0/2;
 
                         const float cos_theta = cache[i0 + 0];
-                        const float sin_theta = cache[i0 + 1];
+                        const float sin_theta = cache[i0 + 1] * sin_scale;
 
                         const ggml_fp16_t * const src = (ggml_fp16_t *)((char *) src0->data + i3*nb03 + i2*nb02 + i1*nb01 + ic*nb00);
                         ggml_fp16_t * dst_data  = (ggml_fp16_t *)((char *)  dst->data + i3*nb3  + i2*nb2  + i1*nb1  + ic*nb0);

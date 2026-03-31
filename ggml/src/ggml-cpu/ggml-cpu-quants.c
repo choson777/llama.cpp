@@ -1050,6 +1050,43 @@ void quantize_row_q8_0(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, i
 #endif
 }
 
+void ggml_quantize_row_q8_0_f16(const ggml_fp16_t * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
+    assert(k % QK8_0 == 0);
+    const int nb = k / QK8_0;
+
+    block_q8_0 * GGML_RESTRICT y = vy;
+
+#if defined(__ARM_NEON) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+    const float16_t * xh = (const float16_t *) x;
+    const float16_t qmax = 127.0f;
+    const float16_t zero = 0.0f;
+
+    for (int i = 0; i < nb; ++i) {
+        const float16x8_t v0 = vld1q_f16(xh + i * QK8_0 +  0);
+        const float16x8_t v1 = vld1q_f16(xh + i * QK8_0 +  8);
+        const float16x8_t v2 = vld1q_f16(xh + i * QK8_0 + 16);
+        const float16x8_t v3 = vld1q_f16(xh + i * QK8_0 + 24);
+
+        float16x8_t amaxv = vmaxq_f16(vabsq_f16(v0), vabsq_f16(v1));
+        amaxv = vmaxq_f16(amaxv, vabsq_f16(v2));
+        amaxv = vmaxq_f16(amaxv, vabsq_f16(v3));
+
+        const float16_t amax = vmaxvq_f16(amaxv);
+        const float16_t d = amax / qmax;
+        const float16_t id = amax != zero ? qmax / amax : zero;
+
+        memcpy(&y[i].d, &d, sizeof(d));
+
+        vst1_s8(y[i].qs +  0, vmovn_s16(vcvtnq_s16_f16(vmulq_n_f16(v0, id))));
+        vst1_s8(y[i].qs +  8, vmovn_s16(vcvtnq_s16_f16(vmulq_n_f16(v1, id))));
+        vst1_s8(y[i].qs + 16, vmovn_s16(vcvtnq_s16_f16(vmulq_n_f16(v2, id))));
+        vst1_s8(y[i].qs + 24, vmovn_s16(vcvtnq_s16_f16(vmulq_n_f16(v3, id))));
+    }
+#else
+    GGML_ABORT("fp16 -> q8_0 quantization requires FP16 vector arithmetic");
+#endif
+}
+
 void quantize_row_q8_1(const float * GGML_RESTRICT x, void * GGML_RESTRICT vy, int64_t k) {
     assert(k % QK8_1 == 0);
     const int nb = k / QK8_1;

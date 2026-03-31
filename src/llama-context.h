@@ -250,6 +250,7 @@ private:
     ggml_backend_buffer_ptr buf_output;
 
     bool has_evaluated_once = false;
+    bool rope_cache_normal_prepared = false;
 
     // perf
     mutable int64_t t_start_us  = 0;

@@ -106,17 +106,34 @@ extern "C" {
 
     // Internal types and functions exposed for tests and benchmarks
 
-    typedef void (*ggml_vec_dot_t)  (int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT x, size_t bx,
-                                       const void * GGML_RESTRICT y, size_t by, int nrc);
+    typedef void (*ggml_from_float16_t)(const ggml_fp16_t * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
+    typedef void (*ggml_vec_dot_t)     (int n, float * GGML_RESTRICT s, size_t bs, const void * GGML_RESTRICT x, size_t bx,
+                                          const void * GGML_RESTRICT y, size_t by, int nrc);
 
     struct ggml_type_traits_cpu {
         ggml_from_float_t        from_float;
+        ggml_from_float16_t      from_float16;
         ggml_vec_dot_t           vec_dot;
         enum ggml_type           vec_dot_type;
         int64_t                  nrows; // number of rows to process simultaneously
     };
 
+    GGML_BACKEND_API void ggml_quantize_row_q8_0_f16(const ggml_fp16_t * GGML_RESTRICT x, void * GGML_RESTRICT y, int64_t k);
     GGML_BACKEND_API const struct ggml_type_traits_cpu * ggml_get_type_traits_cpu(enum ggml_type type);
+
+    // Precompute a plain-text RoPE cache for the ordinary !mrope / !vision / no-freq-factors path.
+    // The cache stores interleaved cos/sin pairs in F32 for positions [0, n_ctx).
+    GGML_BACKEND_API void ggml_rope_cache_prepare_normal(
+            int32_t n_ctx,
+            int32_t n_dims,
+            float   freq_base,
+            float   freq_scale,
+            int32_t n_ctx_orig,
+            float   ext_factor,
+            float   attn_factor,
+            float   beta_fast,
+            float   beta_slow);
+    GGML_BACKEND_API void ggml_rope_cache_clear_normal(void);
 
     GGML_BACKEND_API void ggml_cpu_init(void);
 

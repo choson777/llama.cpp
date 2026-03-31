@@ -621,7 +621,8 @@ ggml_tensor * llm_graph_context::build_cvec(
 ggml_tensor * llm_graph_context::build_lora_mm(
           ggml_tensor * w,
           ggml_tensor * cur) const {
-    ggml_tensor * res = ggml_mul_mat(ctx0, w, cur);
+    GGML_ASSERT(cur->type == GGML_TYPE_F16 || cur->type == GGML_TYPE_F32);
+    ggml_tensor * res = ggml_mul_mat_ext(ctx0, w, cur, cur->type);
 
     for (const auto & lora : *loras) {
         llama_adapter_lora_weight * lw = lora.first->get_weight(w);

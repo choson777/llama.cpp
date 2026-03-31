@@ -148,6 +148,16 @@ target_link_libraries(test-rms-norm-f16 PRIVATE llama)
 add_test(NAME test-rms-norm-f16 COMMAND $<TARGET_FILE:test-rms-norm-f16>)
 set_property(TEST test-rms-norm-f16 PROPERTY LABELS main)
 
+add_executable(test-mul-mat-q4-f16 test-mul-mat-q4-f16.cpp)
+target_link_libraries(test-mul-mat-q4-f16 PRIVATE llama)
+add_test(NAME test-mul-mat-q4-f16 COMMAND $<TARGET_FILE:test-mul-mat-q4-f16>)
+set_property(TEST test-mul-mat-q4-f16 PROPERTY LABELS main)
+
+add_executable(test-rope-cache test-rope-cache.cpp)
+target_link_libraries(test-rope-cache PRIVATE llama)
+add_test(NAME test-rope-cache COMMAND $<TARGET_FILE:test-rope-cache>)
+set_property(TEST test-rope-cache PROPERTY LABELS main)
+
 llama_target_and_test(test-model-load-cancel.cpp  LABEL "model")
 llama_target_and_test(test-autorelease.cpp        LABEL "model")
 
