@@ -26,6 +26,11 @@ struct cmd_params {
     bool print_prompt = false;
 };
 
+static bool env_flag_enabled(const char * name) {
+    const char * value = std::getenv(name);
+    return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
 static void print_usage(int, char ** argv) {
     printf("\nexample usage:\n");
     printf("  %s -m model.gguf -f prompt.txt -n 50\n", argv[0]);
@@ -206,11 +211,13 @@ int main(int argc, char ** argv) {
             params.prompt = read_text_file(params.prompt_file);
         }
 
-        llama_log_set([](enum ggml_log_level level, const char * text, void * /* user_data */) {
-            if (level >= GGML_LOG_LEVEL_ERROR) {
+        bool verbose_logs = env_flag_enabled("AICAS_VERBOSE_LOGS");
+        llama_log_set([](enum ggml_log_level level, const char * text, void * user_data) {
+            const bool verbose = user_data != nullptr && *static_cast<const bool *>(user_data);
+            if (verbose || level >= GGML_LOG_LEVEL_ERROR) {
                 fprintf(stderr, "%s", text);
             }
-        }, nullptr);
+        }, &verbose_logs);
 
         llama_backend_init();
 

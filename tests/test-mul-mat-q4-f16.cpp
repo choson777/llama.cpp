@@ -363,7 +363,11 @@ int main() {
     const bool ok =
             run_case(128, 8, 1, rng) &&
             run_case(128, 8, 5, rng) &&
-            run_case(256, 12, 4, rng);
+            run_case(256, 12, 4, rng) &&
+            run_case(896, 896, 1, rng) &&
+            run_case(896, 128, 1, rng) &&
+            run_case(896, 4864, 1, rng) &&
+            run_case(4864, 896, 1, rng);
 
     if (!ok) {
         return 1;

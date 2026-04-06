@@ -158,6 +158,9 @@ target_link_libraries(test-rope-cache PRIVATE llama)
 add_test(NAME test-rope-cache COMMAND $<TARGET_FILE:test-rope-cache>)
 set_property(TEST test-rope-cache PROPERTY LABELS main)
 
+add_executable(test-attn-flash-vs-mha test-attn-flash-vs-mha.cpp)
+target_link_libraries(test-attn-flash-vs-mha PRIVATE llama)
+
 llama_target_and_test(test-model-load-cancel.cpp  LABEL "model")
 llama_target_and_test(test-autorelease.cpp        LABEL "model")
 

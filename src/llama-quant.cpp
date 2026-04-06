@@ -20,12 +20,6 @@ static void zeros(std::ofstream & file, size_t n) {
     }
 }
 
-static bool llama_tensor_should_store_as_f16(const std::string & name) {
-    return name.find("attn_q.bias") != std::string::npos ||
-           name.find("attn_k.bias") != std::string::npos ||
-           name.find("attn_v.bias") != std::string::npos;
-}
-
 struct quantize_state_impl {
     const llama_model                 & model;
     const llama_model_quantize_params * params;
@@ -782,12 +776,9 @@ static void llama_model_quantize_impl(const std::string & fname_inp, const std::
         // do not quantize relative position bias (T5)
         quantize &= name.find("attn_rel_b.weight") == std::string::npos;
 
-        const bool store_as_f16 = llama_tensor_should_store_as_f16(name) && !params->only_copy;
-
         enum ggml_type new_type;
         void * new_data;
         size_t new_size;
-        bool convert = false;
 
         if (quantize) {
             new_type = default_type;
@@ -808,45 +799,11 @@ static void llama_model_quantize_impl(const std::string & fname_inp, const std::
             quantize = tensor->type != new_type;
         }
 
-        if (!quantize && store_as_f16 && tensor->type != GGML_TYPE_F16) {
-            convert = true;
-            new_type = GGML_TYPE_F16;
-        }
-
-        if (!quantize && !convert) {
+        if (!quantize) {
             new_type = tensor->type;
             new_data = tensor->data;
             new_size = ggml_nbytes(tensor);
             LLAMA_LOG_INFO("size = %8.3f MB\n", ggml_nbytes(tensor)/1024.0/1024.0);
-        } else if (convert) {
-            const int64_t nelements = ggml_nelements(tensor);
-
-            if (work.size() < (size_t) nelements * sizeof(ggml_fp16_t)) {
-                work.resize((size_t) nelements * sizeof(ggml_fp16_t));
-            }
-
-            ggml_fp16_t * f16_data = reinterpret_cast<ggml_fp16_t *>(work.data());
-
-            if (tensor->type == GGML_TYPE_F32) {
-                ggml_fp32_to_fp16_row(reinterpret_cast<const float *>(tensor->data), f16_data, nelements);
-            } else if (tensor->type == GGML_TYPE_BF16) {
-                if (f32_conv_buf.size() < (size_t) nelements) {
-                    f32_conv_buf.resize(nelements);
-                }
-                float * f32_data = reinterpret_cast<float *>(f32_conv_buf.data());
-                ggml_bf16_to_fp32_row(reinterpret_cast<const ggml_bf16_t *>(tensor->data), f32_data, nelements);
-                ggml_fp32_to_fp16_row(f32_data, f16_data, nelements);
-            } else {
-                throw std::runtime_error(format("cannot convert tensor %s from %s to F16",
-                        tensor->name, ggml_type_name(tensor->type)));
-            }
-
-            new_data = f16_data;
-            new_size = (size_t) nelements * ggml_type_size(GGML_TYPE_F16);
-            LLAMA_LOG_INFO("converting to %s .. size = %8.2f MiB -> %8.2f MiB\n",
-                    ggml_type_name(new_type),
-                    ggml_nbytes(tensor)/1024.0/1024.0,
-                    new_size/1024.0/1024.0);
         } else {
             const int64_t nelements = ggml_nelements(tensor);
 

@@ -1109,7 +1109,7 @@ static void ggml_backend_sched_split_graph(ggml_backend_sched_t sched, struct gg
 
             const int node_backend_id = tensor_backend_id(node);
 
-            assert(node_backend_id != -1); // all nodes should be assigned by now
+            GGML_ASSERT(node_backend_id != -1);
 
             // check if we should start a new split based on the sources of the current node
             bool need_new_split = false;

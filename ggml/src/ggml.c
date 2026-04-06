@@ -377,7 +377,23 @@ ggml_bf16_t ggml_fp32_to_bf16(float x) {
 }
 
 void ggml_fp16_to_fp32_row(const ggml_fp16_t * x, float * y, int64_t n) {
-    for (int64_t i = 0; i < n; i++) {
+    int64_t i = 0;
+
+#if defined(__ARM_NEON)
+    #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+        for (; i + 7 < n; i += 8) {
+            const float16x8_t x_vec = vld1q_f16((const ggml_fp16_internal_t *)(x + i));
+            vst1q_f32(y + i + 0, vcvt_f32_f16(vget_low_f16(x_vec)));
+            vst1q_f32(y + i + 4, vcvt_f32_f16(vget_high_f16(x_vec)));
+        }
+    #else
+        for (; i + 3 < n; i += 4) {
+            vst1q_f32(y + i, vcvt_f32_f16(vld1_f16((const ggml_fp16_internal_t *)(x + i))));
+        }
+    #endif
+#endif
+
+    for (; i < n; i++) {
         y[i] = GGML_FP16_TO_FP32(x[i]);
     }
 }
@@ -386,7 +402,21 @@ void ggml_fp16_to_fp32_row(const ggml_fp16_t * x, float * y, int64_t n) {
 //        currently, the ggml_cpu_has_* functions are entirely compile-time
 void ggml_fp32_to_fp16_row(const float * x, ggml_fp16_t * y, int64_t n) {
     int64_t i = 0;
-#if defined(__F16C__)
+#if defined(__ARM_NEON)
+    #if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+        for (; i + 7 < n; i += 8) {
+            const float32x4_t x_vec_0 = vld1q_f32(x + i + 0);
+            const float32x4_t x_vec_1 = vld1q_f32(x + i + 4);
+            const float16x8_t y_vec = vcombine_f16(vcvt_f16_f32(x_vec_0), vcvt_f16_f32(x_vec_1));
+            vst1q_f16((ggml_fp16_internal_t *)(y + i), y_vec);
+        }
+    #else
+        for (; i + 3 < n; i += 4) {
+            const float32x4_t x_vec = vld1q_f32(x + i);
+            vst1_f16((ggml_fp16_internal_t *)(y + i), vcvt_f16_f32(x_vec));
+        }
+    #endif
+#elif defined(__F16C__)
     //if (ggml_cpu_has_f16c()) {
         for (; i + 7 < n; i += 8) {
             __m256 x_vec = _mm256_loadu_ps(x + i);

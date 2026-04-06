@@ -1105,7 +1105,6 @@ bool llama_model_loader::load_all_data(
             return progress_callback(1.0f, progress_callback_user_data);
         }
     }
-
     return true;
 }
 

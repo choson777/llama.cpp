@@ -77,7 +77,7 @@ endif()
 # general
 option(GGML_STATIC "ggml: static link libraries"                     OFF)
 option(GGML_NATIVE "ggml: optimize the build for the current system" ${GGML_NATIVE_DEFAULT})
-option(GGML_LTO    "ggml: enable link time optimization"             OFF)
+option(GGML_LTO    "ggml: enable link time optimization"             ON)
 option(GGML_CCACHE "ggml: use ccache if available"                   ON)
 
 # debug
@@ -217,6 +217,11 @@ set(CMAKE_C_STANDARD_REQUIRED true)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
+
+if (NOT MSVC)
+    set(CMAKE_C_FLAGS_RELEASE "-O3 -DNDEBUG" CACHE STRING "Flags used by the C compiler during Release builds." FORCE)
+    set(CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG" CACHE STRING "Flags used by the CXX compiler during Release builds." FORCE)
+endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 

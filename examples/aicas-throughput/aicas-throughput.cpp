@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -149,6 +150,21 @@ static std::string now_timestamp() {
     std::ostringstream oss;
     oss << std::put_time(&local_tm, "%Y%m%d-%H%M%S");
     return oss.str();
+}
+
+static int env_to_int(const char * name, int fallback) {
+    const char * value = std::getenv(name);
+    if (value == nullptr || value[0] == '\0') {
+        return fallback;
+    }
+
+    char * end = nullptr;
+    const long parsed = std::strtol(value, &end, 10);
+    if (end == value || *end != '\0' || parsed <= 0 || parsed > std::numeric_limits<int>::max()) {
+        return fallback;
+    }
+
+    return static_cast<int>(parsed);
 }
 
 static std::vector<llama_token> tokenize_prompt(const llama_vocab * vocab, const std::string & prompt) {
@@ -308,9 +324,11 @@ int main(int argc, char ** argv) {
         const double decode_throughput = generation_total > 0.0
                 ? (kGenerationTokens * kBenchmarkRuns) / generation_total
                 : 0.0;
+        const int mul_mat_chunk_size = env_to_int("GGML_CPU_MUL_MAT_CHUNK_SIZE", 0);
 
         printf("prefill_throughput: %.6f\n", prefill_throughput);
         printf("decode_throughput: %.6f\n", decode_throughput);
+        printf("mul_mat_chunk_size: %d\n", mul_mat_chunk_size);
 
         const fs::path model_path(params.model_path);
         const fs::path project_dir = fs::absolute(fs::path(params.prompt_file)).parent_path();
@@ -324,6 +342,8 @@ int main(int argc, char ** argv) {
         }
 
         output_file << "{\n";
+        output_file << "  \"flash_attn\": " << (params.flash_attn ? "true" : "false") << ",\n";
+        output_file << "  \"mul_mat_chunk_size\": " << mul_mat_chunk_size << ",\n";
         output_file << "  \"prefill_throughput\": " << std::fixed << std::setprecision(6) << prefill_throughput << ",\n";
         output_file << "  \"decode_throughput\": " << std::fixed << std::setprecision(6) << decode_throughput << "\n";
         output_file << "}\n";

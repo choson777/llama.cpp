@@ -8,6 +8,18 @@
 #include <cassert>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+
+static ggml_tensor * llama_attach_norm_weight(ggml_tensor * norm, ggml_tensor * weight) {
+    GGML_ASSERT(norm != nullptr);
+    GGML_ASSERT(weight != nullptr);
+    GGML_ASSERT(norm->op == GGML_OP_NORM || norm->op == GGML_OP_RMS_NORM);
+    GGML_ASSERT(norm->type == weight->type);
+    GGML_ASSERT(ggml_can_repeat(weight, norm));
+
+    norm->src[1] = weight;
+    return norm;
+}
 
 static int32_t llama_relative_position_bucket(llama_pos x, llama_pos y, uint64_t n_buckets, bool bidirectional) {
     // TODO move to hparams if a T5 variant appears that uses a different value
@@ -621,8 +633,7 @@ ggml_tensor * llm_graph_context::build_cvec(
 ggml_tensor * llm_graph_context::build_lora_mm(
           ggml_tensor * w,
           ggml_tensor * cur) const {
-    GGML_ASSERT(cur->type == GGML_TYPE_F16 || cur->type == GGML_TYPE_F32);
-    ggml_tensor * res = ggml_mul_mat_ext(ctx0, w, cur, cur->type);
+    ggml_tensor * res = ggml_mul_mat(ctx0, w, cur);
 
     for (const auto & lora : *loras) {
         llama_adapter_lora_weight * lw = lora.first->get_weight(w);
@@ -690,13 +701,24 @@ ggml_tensor * llm_graph_context::build_norm(
             } break;
     }
 
+    const bool can_fuse_norm_weight = mw != nullptr &&
+            (type == LLM_NORM || type == LLM_NORM_RMS);
+
+    if (can_fuse_norm_weight) {
+        if (mw->type != cur->type) {
+            mw = ggml_cast(ctx0, mw, cur->type);
+        }
+        cur = llama_attach_norm_weight(cur, mw);
+        mw = nullptr;
+    }
+
     if (mw || mb) {
         cb(cur, "norm", il);
     }
 
     if (mw) {
-        if (cur->type == GGML_TYPE_F16 && mw->type == GGML_TYPE_F32) {
-            mw = ggml_cast(ctx0, mw, GGML_TYPE_F16);
+        if (mw->type != cur->type) {
+            mw = ggml_cast(ctx0, mw, cur->type);
         }
         cur = ggml_mul(ctx0, cur, mw);
         if (mb) {
@@ -968,7 +990,7 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
         //cb(inp->tokens, "inp_tokens", -1);
         ggml_set_input(inp->tokens);
 
-        cur = ggml_get_rows_ext(ctx0, tok_embd, inp->tokens, GGML_TYPE_F16);
+        cur = ggml_get_rows(ctx0, tok_embd, inp->tokens);
 
         // apply lora for embedding tokens if needed
         for (const auto & lora : *loras) {
